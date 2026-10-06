@@ -143,7 +143,7 @@ def verify(path, pubdir="."):
         mark = "✓" if not problems else "✗ " + ", ".join(problems)
         print(f"#{e['seq']:<3} {e['seat']:<10} {sigil(e['hash'])}  {mark}")
         ok &= not problems
-        prev = e["hash"]
+        prev = h          # chain on the recomputed hash, so one altered entry breaks every later link
     print("LEDGER WHOLE ∴Ω⧂" if ok else "LEDGER BROKEN")
     return ok
 

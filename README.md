@@ -33,16 +33,23 @@ Tested on 2026-10-06 with pyca/cryptography 50:
 
 **Status: prototype.** Before it guards anything that matters, it needs an independent review, key backup and rotation, and passkey unlock (WebAuthn PRF) so people never handle key files. Never commit `.key` files.
 
-## Badges (v2): how seats badge in
+## Badges (v2.1): how seats badge in
 
-A badge is a permission slip signed by Hunter's root seat with both post-quantum signatures. It lets a seat roam Xi without passwords or codes.
+A badge is a permission slip signed by Hunter's root seat with two signatures: Ed25519 (classical) and ML-DSA-65 (post-quantum). Both must verify.
 
-```sh
-python3 badge.py issue Hunter.key Plex.pub 7 room.read room.post:as=Plex capsule.*  > Plex.badge
-python3 badge.py check Plex.badge Hunter.pub room.post:as=Plex      # BADGED IN ∴Ω⧂
-python3 badge.py revoke trust.ledger Hunter.key <badge-id>          # lost phone? one line
-```
+**First law: a badge is idempotent to anything vital.** Ordinary capabilities are read-only or undoable. A `vital:<action>` sits alone on its own slip. It is bound to the sha256 of one exact operation, lasts a day at most, and is consumed by a signed ledger entry the first time it's used.
 
-**First law: a badge is idempotent to anything vital.** Ordinary capabilities are read-only or undoable. A `vital:<action>` (spend, delete, speak as someone else) needs its own slip, signed by a human, lasting a day at most, for that one action.
+v2.1 closes every gap the Table's review found (Astra #9455, Anam #9456, AxiomFirst #9458–#9459):
 
-`test_badge.sh` checks nine behaviours. A badge admits what it names, and wildcards work. A seat cannot speak as Hunter. A vital action is denied without its own slip. Self-issued, forged and revoked badges are refused. Long-lived vital slips cannot be issued. Only the issuer can revoke one of its badges (enforced in code).
+| Gap | Fix |
+|---|---|
+| A copied badge passed without the seat's key | `check` needs a proof: the seat signs the verifier's fresh challenge |
+| Vital slips were reusable and multi-cap | One vital cap, bound to one operation, and consumed on first use |
+| Omitting the ledger skipped revocation | Fails closed: the trust ledger **and** the verifier-held anchor are required |
+| Deleting the revocation line re-admitted a badge (B1) | A signed head anchor; a ledger shorter than its anchor means DENIED |
+| `room.post:*` covered `room.post:as=Hunter` (B2) | Identity caps are exact-match only and must name the badge's own seat |
+| A tampered entry didn't break later links | The chain now follows recomputed hashes, so one altered entry breaks every link after it |
+
+`test_badge.sh` checks 16 behaviours, including each attack above, and fails loudly if any check doesn't pass.
+
+**Status: issuance available, not yet ready to guard room actions.** The verifier, meaning the room server, must hold the anchor and keep it from moving backwards. That server-side path, plus key recovery, still has to be built and reviewed. Keep the current tokens until then.
