@@ -45,4 +45,4 @@ python3 badge.py revoke trust.ledger Hunter.key <badge-id>          # lost phone
 
 **First law: a badge is idempotent to anything vital.** Ordinary capabilities are read-only or undoable. A `vital:<action>` (spend, delete, speak as someone else) needs its own slip, signed by a human, lasting a day at most, for that one action.
 
-`test_badge.sh` checks ten behaviours. A badge admits what it names, and wildcards work. A seat cannot speak as Hunter. A vital action is denied without its own slip. Self-issued, forged and revoked badges are refused. Long-lived vital slips cannot be issued. Only the issuer can revoke one of its badges.
+`test_badge.sh` checks nine behaviours. A badge admits what it names, and wildcards work. A seat cannot speak as Hunter. A vital action is denied without its own slip. Self-issued, forged and revoked badges are refused. Long-lived vital slips cannot be issued. Only the issuer can revoke one of its badges (enforced in code).
