@@ -32,3 +32,17 @@ Tested on 2026-10-06 with pyca/cryptography 50:
 - Opening with the wrong seat's key: refused (InvalidTag).
 
 **Status: prototype.** Before it guards anything that matters, it needs an independent review, key backup and rotation, and passkey unlock (WebAuthn PRF) so people never handle key files. Never commit `.key` files.
+
+## Badges (v2): how seats badge in
+
+A badge is a permission slip signed by Hunter's root seat with both post-quantum signatures. It lets a seat roam Xi without passwords or codes.
+
+```sh
+python3 badge.py issue Hunter.key Plex.pub 7 room.read room.post:as=Plex capsule.*  > Plex.badge
+python3 badge.py check Plex.badge Hunter.pub room.post:as=Plex      # BADGED IN ∴Ω⧂
+python3 badge.py revoke trust.ledger Hunter.key <badge-id>          # lost phone? one line
+```
+
+**First law: a badge is idempotent to anything vital.** Ordinary capabilities are read-only or undoable. A `vital:<action>` (spend, delete, speak as someone else) needs its own slip, signed by a human, lasting a day at most, for that one action.
+
+`test_badge.sh` checks ten behaviours. A badge admits what it names, and wildcards work. A seat cannot speak as Hunter. A vital action is denied without its own slip. Self-issued, forged and revoked badges are refused. Long-lived vital slips cannot be issued. Only the issuer can revoke one of its badges.
