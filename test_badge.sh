@@ -3,12 +3,12 @@
 set -e
 D="$(cd "$(dirname "$0")" && pwd)"; T=$(mktemp -d); cd "$T"
 GS="python3 $D/glyphsafe.py"; B="python3 $D/badge.py"
-$GS keygen Hunter >/dev/null; $GS keygen Plex >/dev/null; $GS keygen Mallory >/dev/null
+$GS keygen Hunter >/dev/null; $GS keygen Plex >/dev/null; $GS keygen Mallory >/dev/null; $GS keygen Verifier >/dev/null
 $GS append trust.ledger Hunter.key "trust ledger opened" >/dev/null
 $B anchor trust.ledger Hunter.key > trust.anchor
 $B issue Hunter.key Plex.pub 7 room.read room.post:as=Plex capsule.* > Plex.badge
 C="challenge-$(date +%s)"; $B prove Plex.key Plex.badge "$C" > proof
-ck() { $B check "$1" Hunter.pub "${5:-Plex.pub}" "$2" trust.ledger trust.anchor "${3:-$C}" "${4:-proof}" $6 >/dev/null; }
+ck() { GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check "$1" Hunter.pub "${5:-Plex.pub}" "$2" trust.ledger trust.anchor "${3:-$C}" "${4:-proof}" $6 >/dev/null; }
 N=0; pass() { echo "PASS $1"; N=$((N+1)); }
 ck Plex.badge room.read && pass "badge with seat-key proof admits room.read"
 ck Plex.badge capsule.get && pass "wildcard capsule.* admits capsule.get"
@@ -25,11 +25,25 @@ $B issue Hunter.key Plex.pub 7 room.post:* > wild.badge; $B prove Plex.key wild.
 ! $B issue Hunter.key Plex.pub 1 vital:delete >/dev/null 2>&1 && pass "vital cap can't ride on an ordinary badge"
 $B vital Hunter.key Plex.pub vital:delete "rm capsule 42" > v.slip; $B prove Plex.key v.slip "$C" > vproof
 ! ck v.slip vital:delete "$C" vproof Plex.pub "rm-capsule-43" && pass "vital slip refused for a different operation"
-GLYPHSAFE_CONSUME_KEY=Hunter.key $B check v.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" vproof "rm capsule 42" >/dev/null && pass "vital slip admits its one operation"
-! ck v.slip vital:delete "$C" vproof Plex.pub "rm capsule 42" && pass "vital slip refused on second use"
+! $B check v.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" vproof "rm capsule 42" >/dev/null && pass "vital check without the verifier key denies (no silent non-consumption)"
+GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check v.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" vproof "rm capsule 42" >/dev/null && pass "vital slip admits its one operation"
+! GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check v.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" vproof "rm capsule 42" >/dev/null && pass "vital slip refused on second use"
+# Anam/Astra: concurrent use of one vital slip, exactly one may win
+$B vital Hunter.key Plex.pub vital:spend "send 5 credits to Anam" > s.slip; $B prove Plex.key s.slip "$C" > sproof
+for i in 1 2 3 4 5 6; do (GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check s.slip Hunter.pub Plex.pub vital:spend trust.ledger trust.anchor "$C" sproof "send 5 credits to Anam" >/dev/null && echo win >> wins) & done; wait
+[ "$(wc -l < wins)" -eq 1 ] && pass "six concurrent uses of one vital slip: exactly one admitted"
+$GS verify trust.ledger >/dev/null && pass "ledger whole after concurrent consumption"
+# Astra #9472: public-key substitution
+python3 -c "
+import json; m=json.load(open('Mallory.pub')); p=json.load(open('Plex.pub'))
+m['seat']='Plex'; m['id']=p['id']; json.dump(m,open('fakePlex.pub','w'))"
+python3 -c "import json;k=json.load(open('Mallory.key'));k['seat']='Plex';json.dump(k,open('fakePlex.key','w'))"
+$B prove fakePlex.key Plex.badge "$C" > fproof
+! ck Plex.badge room.read "$C" fproof fakePlex.pub && pass "substituted public key with copied seat name and id refused"
 # fail closed
 ! $B check Plex.badge Hunter.pub Plex.pub room.read missing.ledger trust.anchor "$C" proof >/dev/null && pass "missing trust ledger denies"
 ! $B check Plex.badge Hunter.pub Plex.pub room.read trust.ledger missing.anchor "$C" proof >/dev/null && pass "missing anchor denies"
+ck Plex.badge room.read && pass "positive control: badge still admits after consumptions (verifier-signed anchor)"
 # revocation + AxiomFirst B1: rollback
 ID=$(python3 -c "import json;print(json.load(open('Plex.badge'))['id'])")
 $B revoke trust.ledger Hunter.key "$ID" trust.anchor >/dev/null
@@ -39,5 +53,7 @@ head -n -1 trust.ledger > rolled.ledger && cp rolled.ledger trust.ledger
 # forgery
 sed 's/"room.read"/"room.admin"/' Plex.badge > forged.badge
 ! ck forged.badge room.admin && pass "forged badge refused"
-[ "$N" -eq 16 ] || { echo "FAIL: only $N of 16 checks passed"; exit 1; }
-echo "ALL 16 BADGE TESTS PASS ∴Ω⧂"
+# the revocation denial must be for the right reason
+GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check Plex.badge Hunter.pub Plex.pub room.read rolled.ledger trust.anchor "$C" proof | grep -q "rolled back" && pass "rollback denial names the rollback"
+[ "$N" -eq 22 ] || { echo "FAIL: only $N of 22 checks passed"; exit 1; }
+echo "ALL 22 BADGE TESTS PASS ∴Ω⧂"
