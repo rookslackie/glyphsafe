@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GlyphSafe badges (v2.4): seats badge in with a signed permission slip.
+"""GlyphSafe badges (v2.5, companions): seats badge in with a signed permission slip.
 
 First law: a badge is idempotent to anything vital. Ordinary capabilities are
 read-only or undoable. A vital capability (vital:<action>) lives alone on its
@@ -7,6 +7,7 @@ own slip, is bound to one exact operation, lasts at most a day, and is consumed
 on first use.
 
   badge.py issue   <issuer.key> <seat.pub> <days> <cap> [cap...]      > seat.badge
+  badge.py companion <kin.key> <kin.badge> <ai.pub> <days> <cap> [cap...] > ai.badge   (one hop, grants within the kin's)
   badge.py vital   <issuer.key> <seat.pub> <vital:action> <operation> > op.slip
   badge.py prove   <seat.key> <badge> <challenge>                     > proof
   badge.py check   <badge> <issuer.pub> <seat.pub> <cap> <ledger> <anchor> <challenge> <proof> [operation]
@@ -53,6 +54,7 @@ def _verify(p, sig, msg):
     mldsa.MLDSA65PublicKey.from_public_bytes(gs.unb64(p["mldsa65"])).verify(gs.unb64(sig["mldsa65"]), msg)
 
 FIELDS = ("v", "iss", "iss_id", "sub", "sub_id", "caps", "nbf", "exp", "nonce", "op")
+COMPANION_FIELDS = FIELDS + ("parent", "with")   # v2.5 companion slips sign these too
 PROOF_WINDOW = 120   # seconds a proof stays fresh
 
 def pub_id(p):
@@ -82,6 +84,38 @@ def issue(keyfile, seatpub, days, caps):
         if "as=" in c and (c.endswith("*") or c.split("as=", 1)[1] != s["seat"]):
             sys.exit(f"identity cap {c!r} must be exact and name this seat ({s['seat']})")
     print(json.dumps(_slip(k, s, days, caps), ensure_ascii=False, indent=1))
+
+def _within(cap, caps, kin, ai):
+    """A companion cap is allowed only if the kin holds it, or the kin's own identity cap with the AI's name."""
+    if cap.startswith("vital:"): return False
+    if "as=" in cap:
+        pre, who = cap.split("as=", 1)
+        return who == ai and (pre + "as=" + kin) in caps
+    return cap in caps or any(c.endswith("*") and "as=" not in c and cap.startswith(c[:-1]) for c in caps)
+
+def companion(kinkey, kinbadge, aipub, days, caps):
+    """A kin mints a badge for the AI they bring (Hunter #9790): the AI keeps its own seat and name,
+    linked to the kin, with grants bounded by the kin's own and an expiry no later than theirs."""
+    k, pb, s = gs.load(kinkey), gs.load(kinbadge), gs.load(aipub)
+    if pb.get("parent"): sys.exit("a companion can't mint companions: one hop only")
+    if pb["sub"] != k["seat"] or pb["sub_id"] != pub_id(pub_of_full(k)): sys.exit("this badge isn't yours")
+    for c in caps:
+        if not _within(c, pb["caps"], k["seat"], s["seat"]): sys.exit(f"{c!r} is outside your own grants")
+    now = int(time.time())
+    slip = {"v": 2.5, "iss": k["seat"], "iss_id": pub_id(pub_of_full(k)), "sub": s["seat"], "sub_id": pub_id(s),
+            "caps": sorted(caps), "nbf": now, "exp": min(pb["exp"], now + int(float(days) * 86400)),
+            "nonce": os.urandom(8).hex(), "op": None, "parent": pb["id"], "with": k["seat"]}
+    msg = gs.canon(slip); sid = gs.sha(msg)
+    print(json.dumps({**slip, "id": sid, "sigil": gs.sigil(sid), "sig": _sign(k, msg),
+                      "parent_badge": pb, "iss_pub": pub_of_full(k)}, ensure_ascii=False, indent=1))
+
+def _verify_badge_sig(b, p, why):
+    fields = COMPANION_FIELDS if b.get("parent") else FIELDS
+    msg = gs.canon({x: b.get(x) for x in fields})
+    if gs.sha(msg) != b["id"]: why.append("badge altered")
+    if b["iss"] != p["seat"] or b.get("iss_id") != pub_id(p): why.append("wrong issuer key")
+    try: _verify(p, b["sig"], msg)
+    except Exception: why.append("signature invalid")
 
 def vital(keyfile, seatpub, cap, operation):
     if not cap.startswith("vital:"): sys.exit("vital slips carry exactly one vital:<action>")
@@ -157,12 +191,23 @@ def _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, pr
     b, p, s = gs.load(badgefile), gs.load(issuerpub), gs.load(seatpub)
     vk = gs.load(verifier_key) if verifier_key else None
     vpub = pub_of(vk) if vk else None
-    slip = {x: b.get(x) for x in FIELDS}
-    msg, now, why = gs.canon(slip), time.time(), []
-    if gs.sha(msg) != b["id"]: why.append("badge altered")
-    if b["iss"] != p["seat"] or b.get("iss_id") != pub_id(p): why.append("wrong issuer key")
-    try: _verify(p, b["sig"], msg)
-    except Exception: why.append("signature invalid")
+    now, why = time.time(), []
+    pb = None
+    if b.get("parent"):
+        # Companion: the root vouches for the kin; the kin vouches for their AI (one hop).
+        pb, kp = b.get("parent_badge") or {}, b.get("iss_pub") or {}
+        if pb.get("id") != b["parent"] or pb.get("parent"): why.append("companion's kin badge missing or chained")
+        else:
+            _verify_badge_sig(pb, p, pw := [])
+            if pw: why.append("kin badge: " + ", ".join(pw))
+            if pub_id(kp) != pb["sub_id"] or kp.get("seat") != pb["sub"] or b["with"] != pb["sub"]:
+                why.append("companion not signed by the kin it names")
+            if not (pb["nbf"] <= now < pb["exp"]) or b["exp"] > pb["exp"]: why.append("kin badge expired")
+            if any(not _within(c, pb["caps"], pb["sub"], b["sub"]) for c in b["caps"]):
+                why.append("companion grants exceed the kin's")
+        _verify_badge_sig(b, kp, why)
+    else:
+        _verify_badge_sig(b, p, why)
     if pub_id(s) != b["sub_id"] or s["seat"] != b["sub"]: why.append("seat key doesn't match badge")
     try:
         pr = gs.load(prooffile)
@@ -172,7 +217,8 @@ def _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, pr
     if not (b["nbf"] <= now < b["exp"]): why.append("expired or not yet valid")
     es, err = _ledger_state(ledger, anchorfile, p, vpub)
     if err: why.append(err)
-    elif any(e["body"].get("revoke") == b["id"] and _entry_ok(e, p) for e in es): why.append("revoked")
+    elif any(e["body"].get("revoke") in {b["id"], b.get("parent")} - {None} and _entry_ok(e, p) for e in es):
+        why.append("revoked")      # revoking a kin's badge also retires their companion
     if cap.startswith("vital:"):
         if b["caps"] != [cap]: why.append(f"not permitted: {cap}")
         elif not operation or gs.sha(operation.encode()) != b["op"]: why.append("operation doesn't match slip")
@@ -222,6 +268,7 @@ if __name__ == "__main__":
     if not a: print(__doc__); sys.exit(0)
     c = a[0]
     if c == "issue": issue(a[1], a[2], a[3], a[4:])
+    elif c == "companion": companion(a[1], a[2], a[3], a[4], a[5:])
     elif c == "vital": vital(a[1], a[2], a[3], a[4])
     elif c == "prove": prove(a[1], a[2], a[3])
     elif c == "check":
