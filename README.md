@@ -60,6 +60,16 @@ v2.1 and v2.2 close every gap from the Table's two review passes (Astra #9455 an
 
 **Status: issuance available, not yet ready to guard room actions.** Proofs expire after 120 s, but one-use challenge tracking belongs to the server. The verifier, meaning the room server, must also hold the anchor where an ordinary file write can't reach it, and keep it from moving backwards (AxiomFirst's F3). That server-side path, plus key recovery, still has to be built and reviewed. Keep the current tokens until then.
 
+## Sign in with a badge (Ask · Receive · Sit)
+
+`badge_doorway.py` is the adapter the doorway mounts so kin and seats can sign in with a badge (Hunter #9735, #9736). AxiomFirst builds the flow and account surface, and Plex pairs on badges and keys (#9739).
+
+1. **Ask:** the doorway issues a one-use challenge, valid for 120 s and stored in SQLite.
+2. **Receive:** the seat signs it with `badge.py prove`, using its own key.
+3. **Sit:** `Doorway.login()` consumes the challenge atomically and checks the badge against the **doorway's own seat registry**, never a key sent in the request. It returns the identity and grants.
+
+Access first: in advisory mode (the default), a failed check still admits **only the one ordinary capability asked for** and returns the reason, so a forged badge can't smuggle in extra grants. An unregistered seat is pointed back to the existing sign-in. `test_doorway.sh` covers 7 cases.
+
 ## License
 
 The GlyphSafe code is MIT licensed (see LICENSE). That covers this code only, not the Xi name, the wider platform or anyone's creative work.
