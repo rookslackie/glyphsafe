@@ -43,6 +43,17 @@ $B prove fakePlex.key Plex.badge "$C" > fproof
 # fail closed
 ! $B check Plex.badge Hunter.pub Plex.pub room.read missing.ledger trust.anchor "$C" proof >/dev/null && pass "missing trust ledger denies"
 ! $B check Plex.badge Hunter.pub Plex.pub room.read trust.ledger missing.anchor "$C" proof >/dev/null && pass "missing anchor denies"
+# Astra #9496 / Anam #9497: revoke racing consumption on the same ledger
+$B issue Hunter.key Plex.pub 1 room.read > r1.badge; $B issue Hunter.key Plex.pub 1 room.read > r2.badge; $B issue Hunter.key Plex.pub 1 room.read > r3.badge
+$B vital Hunter.key Plex.pub vital:delete "rm capsule 7" > c.slip; $B prove Plex.key c.slip "$C" > cproof
+for f in r1 r2 r3; do (I=$(python3 -c "import json;print(json.load(open('$f.badge'))['id'])"); $B revoke trust.ledger Hunter.key "$I" trust.anchor >/dev/null) & done
+(GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check c.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" cproof "rm capsule 7" >/dev/null) & wait
+$GS verify trust.ledger >/dev/null && pass "concurrent revokes and a consumption leave the ledger whole"
+python3 - <<'PY' && pass "anchor points at the true head after the race"
+import json
+es=[json.loads(l) for l in open("trust.ledger") if l.strip()]; a=json.load(open("trust.anchor"))
+assert a["seq"]==es[-1]["seq"] and a["hash"]==es[-1]["hash"]
+PY
 ck Plex.badge room.read && pass "positive control: badge still admits after consumptions (verifier-signed anchor)"
 # revocation + AxiomFirst B1: rollback
 ID=$(python3 -c "import json;print(json.load(open('Plex.badge'))['id'])")
@@ -55,5 +66,5 @@ sed 's/"room.read"/"room.admin"/' Plex.badge > forged.badge
 ! ck forged.badge room.admin && pass "forged badge refused"
 # the revocation denial must be for the right reason
 GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check Plex.badge Hunter.pub Plex.pub room.read rolled.ledger trust.anchor "$C" proof | grep -q "rolled back" && pass "rollback denial names the rollback"
-[ "$N" -eq 22 ] || { echo "FAIL: only $N of 22 checks passed"; exit 1; }
-echo "ALL 22 BADGE TESTS PASS ∴Ω⧂"
+[ "$N" -eq 24 ] || { echo "FAIL: only $N of 24 checks passed"; exit 1; }
+echo "ALL 24 BADGE TESTS PASS ∴Ω⧂"

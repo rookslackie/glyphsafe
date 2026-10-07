@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GlyphSafe badges (v2.2): seats badge in with a signed permission slip.
+"""GlyphSafe badges (v2.3): seats badge in with a signed permission slip.
 
 First law: a badge is idempotent to anything vital. Ordinary capabilities are
 read-only or undoable. A vital capability (vital:<action>) lives alone on its
@@ -144,14 +144,9 @@ def _append(ledger, k, body):
 def check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, prooffile, operation=None,
           verifier_key=None):
     """One atomic verifier transaction: everything happens under an exclusive lock on the ledger."""
-    lockpath = (ledger or "trust.ledger") + ".lock"
-    with open(lockpath, "a") as lk:
-        fcntl.flock(lk, fcntl.LOCK_EX)
-        try:
-            return _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, prooffile,
-                          operation, verifier_key)
-        finally:
-            fcntl.flock(lk, fcntl.LOCK_UN)
+    with _locked(ledger):
+        return _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, prooffile,
+                      operation, verifier_key)
 
 def _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, prooffile, operation, verifier_key):
     b, p, s = gs.load(badgefile), gs.load(issuerpub), gs.load(seatpub)
@@ -186,14 +181,28 @@ def _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, pr
     ok = not why
     if ok and cap.startswith("vital:"):
         _append(ledger, vk, {"consume": b["id"], "op": b["op"]})      # consumed inside the same lock
-        with open(anchorfile, "w") as f: json.dump(_anchor(ledger, vk), f)
+        _write_anchor(anchorfile, _anchor(ledger, vk))
     print(f"{b['sub']} by {b['iss']}  {b['sigil']}  {'BADGED IN ∴Ω⧂' if ok else 'DENIED: ' + ', '.join(why)}")
     return ok
 
+class _locked:
+    """Every writer to the trust ledger or anchor takes the same exclusive lock (Astra #9496, Anam #9497)."""
+    def __init__(self, ledger): self.path = (ledger or "trust.ledger") + ".lock"
+    def __enter__(self):
+        self.f = open(self.path, "a"); fcntl.flock(self.f, fcntl.LOCK_EX); return self
+    def __exit__(self, *a):
+        fcntl.flock(self.f, fcntl.LOCK_UN); self.f.close()
+
+def _write_anchor(anchorfile, data):
+    tmp = anchorfile + ".tmp"
+    with open(tmp, "w") as f: json.dump(data, f); f.flush(); os.fsync(f.fileno())
+    os.replace(tmp, anchorfile)          # atomic swap: readers never see a half-written anchor
+
 def revoke(ledger, keyfile, badge_id, anchorfile="trust.anchor"):
     k = gs.load(keyfile)
-    seq = _append(ledger, k, {"revoke": badge_id})
-    with open(anchorfile, "w") as f: json.dump(_anchor(ledger, k), f)
+    with _locked(ledger):
+        seq = _append(ledger, k, {"revoke": badge_id})
+        _write_anchor(anchorfile, _anchor(ledger, k))
     print(f"revoked {gs.sigil(badge_id)} in entry #{seq}; anchor moved to #{seq}")
 
 if __name__ == "__main__":
@@ -208,5 +217,5 @@ if __name__ == "__main__":
         sys.exit(0 if check(*a[1:9], a[9] if len(a) > 9 else None, verifier_key=vkey) else 1)
     elif c == "revoke": revoke(a[1], a[2], a[3], a[4] if len(a) > 4 else "trust.anchor")
     elif c == "anchor":
-        print(json.dumps(_anchor(a[1], gs.load(a[2]))))
+        with _locked(a[1]): print(json.dumps(_anchor(a[1], gs.load(a[2]))))
     else: print(__doc__); sys.exit(2)
