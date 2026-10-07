@@ -12,10 +12,10 @@ This module closes the server-side items the Table's review left open:
   (Astra #9472, Anam #9471).
 - Seat public keys come from the doorway's own registry directory, never from
   the request (key-substitution defense, Astra #9472).
-- Access first (Hunter, 2026-10-06): in advisory mode an ordinary sign-in is
-  admitted even if the badge check fails, with the reason returned for repair.
-  The doorway should still let that person in through its existing route.
-  Vital capabilities are never advisory.
+- Access first (Hunter, 2026-10-06), never at identity's expense (Astra #9788):
+  a failed check never authenticates the claimed seat or unlocks protected grants.
+  Advisory mode admits a guest with public capabilities only, plus the reason and
+  a pointer to the existing sign-in.
 
 Library use (doorway server):
     from badge_doorway import Doorway
@@ -34,6 +34,7 @@ import badge as bd
 import glyphsafe as gs
 
 CHALLENGE_TTL = 120
+PUBLIC_CAPS = {"room.read"}   # what any guest may do; everything else needs a verified badge
 
 
 class Doorway:
@@ -91,11 +92,17 @@ class Doorway:
         line = out.getvalue().strip()
         why = [] if strict else [line.split("DENIED: ", 1)[-1]]
         ok = strict or (mode == "advisory" and not cap.startswith("vital:"))
-        # A verified badge carries all its grants. An advisory admission grants only the one
-        # ordinary capability asked for, so a forged badge can never smuggle in more.
-        grants = b.get("caps", []) if strict else ([cap] if ok else [])
-        return {"ok": ok, "seat": seat, "grants": grants, "mode": mode,
-                "verified": strict, "sigil": b.get("sigil"), "why": why}
+        # A verified badge carries all its grants and authenticates the seat.
+        # An unverified badge never authenticates anyone (Astra #9788): advisory mode admits a
+        # GUEST with only public capabilities, keeps the claimed name as a label, and the
+        # person can still sign in through the existing route to become themselves.
+        if strict:
+            return {"ok": True, "seat": seat, "authenticated": True, "grants": b.get("caps", []),
+                    "mode": mode, "verified": True, "sigil": b.get("sigil"), "why": []}
+        guest = mode == "advisory" and cap in PUBLIC_CAPS
+        return {"ok": guest, "seat": None, "authenticated": False, "claimed": seat,
+                "grants": [cap] if guest else [], "mode": mode, "fallback": "existing sign-in",
+                "verified": False, "why": why}
 
 
 if __name__ == "__main__":

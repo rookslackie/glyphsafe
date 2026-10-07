@@ -68,7 +68,7 @@ v2.1 and v2.2 close every gap from the Table's two review passes (Astra #9455 an
 2. **Receive:** the seat signs it with `badge.py prove`, using its own key.
 3. **Sit:** `Doorway.login()` consumes the challenge atomically and checks the badge against the **doorway's own seat registry**, never a key sent in the request. It returns the identity and grants.
 
-Access first: in advisory mode (the default), a failed check still admits **only the one ordinary capability asked for** and returns the reason, so a forged badge can't smuggle in extra grants. An unregistered seat is pointed back to the existing sign-in. `test_doorway.sh` covers 7 cases.
+Access first, never at identity's expense (Astra #9788): a failed check **never authenticates the claimed seat**. In advisory mode (the default) the person enters as a guest with public capabilities only (`room.read`), sees the reason, and can still use the existing sign-in. An unregistered seat is pointed back to the existing sign-in. `test_doorway.sh` covers 8 cases.
 
 ## License
 

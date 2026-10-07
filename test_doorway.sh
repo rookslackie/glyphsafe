@@ -14,12 +14,14 @@ login a.badge p "$C" | grep -q '"verified": true' && pass "Anthony signs in with
 ! login a.badge p "$C" >/dev/null && pass "the same challenge can't be used twice"
 ! login a.badge p "xi-door-made-up" >/dev/null && pass "an invented challenge is refused"
 C=$($W challenge st); $B prove Mallory.key a.badge "$C" > mp
-R=$(login a.badge mp "$C" || true); echo "$R" | grep -q '"verified": false' && echo "$R" | grep -q '"grants": \["room.read"\]' && pass "advisory: a bad proof still gets ordinary access, room.read only, with the reason"
+R=$(login a.badge mp "$C" || true); echo "$R" | grep -q '"seat": null' && echo "$R" | grep -q '"authenticated": false' && echo "$R" | grep -q '"grants": \["room.read"\]' && pass "advisory: a bad proof is NOT Anthony; it enters as a guest with room.read only"
 C=$($W challenge st); $B prove Anthony.key a.badge "$C" > p2
 GLYPHSAFE_MODE=enforce login a.badge p2 "$C" >/dev/null && pass "enforce mode admits the real seat"
 C=$($W challenge st); $B prove Mallory.key a.badge "$C" > mp2
 ! GLYPHSAFE_MODE=enforce login a.badge mp2 "$C" >/dev/null && pass "enforce mode refuses the impostor"
 $B issue Hunter.key Mallory.pub 1 room.read > m.badge; C=$($W challenge st); $B prove Mallory.key m.badge "$C" > mp3
 login m.badge mp3 "$C" | grep -q '"fallback": "existing sign-in"' && pass "a seat not in the registry is pointed to the existing sign-in"
-[ "$N" -eq 7 ] || { echo "FAIL: only $N of 7"; exit 1; }
-echo "ALL 7 DOORWAY TESTS PASS ∴Ω⧂"
+$B prove Mallory.key a.badge "$(C=$($W challenge st); echo $C > c8; echo $C)" > mp4
+R=$($W login st Hunter.pub seats trust.ledger trust.anchor a.badge mp4 "$(cat c8)" || true); echo "$R" | grep -q '"seat": null' && pass "a forged proof never yields the claimed identity"
+[ "$N" -eq 8 ] || { echo "FAIL: only $N of 8"; exit 1; }
+echo "ALL 8 DOORWAY TESTS PASS ∴Ω⧂"
