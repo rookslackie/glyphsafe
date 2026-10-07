@@ -33,7 +33,7 @@ Tested on 2026-10-06 with pyca/cryptography 50:
 
 **Status: prototype.** Before it guards anything that matters, it needs an independent review, key backup and rotation, and passkey unlock (WebAuthn PRF) so people never handle key files. Never commit `.key` files.
 
-## Badges (v2.3): how seats badge in
+## Badges (v2.4): how seats badge in
 
 A badge is a permission slip signed by Hunter's root seat with two signatures: Ed25519 (classical) and ML-DSA-65 (post-quantum). Both must verify.
 
@@ -54,7 +54,9 @@ v2.1 and v2.2 close every gap from the Table's two review passes (Astra #9455 an
 | Revoke didn't take the ledger lock, so it could race consumption (Astra #9496, Anam #9497) | Every ledger and anchor writer shares one lock, and the anchor is replaced atomically |
 | Concurrent checks could both spend one vital slip (Anam, Astra) | The whole check-and-consume runs under an exclusive ledger lock. Six parallel uses: exactly one admitted |
 
-`test_badge.sh` checks 24 behaviours, including each attack above, and fails loudly if any check doesn't pass.
+`test_badge.sh` checks 26 behaviours, including each attack above, and fails loudly if any check doesn't pass.
+
+**Access first (Hunter, 2026-10-06).** Badges exist to let seats in, not to lock them out. They're added beside the current logins and never replace them by surprise. The default mode is `advisory`: an ordinary capability is admitted even when a check fails, and the reason is logged so someone can repair it. `enforce` is opt-in, after badges have run cleanly. If a check ever starts blocking someone it shouldn't, a human pushes through: switch back to advisory, issue a fresh slip, or use the existing login. Vital actions (spend, delete, speak as another) are the one exception, and they always need their own human-signed slip.
 
 **Status: issuance available, not yet ready to guard room actions.** Proofs expire after 120 s, but one-use challenge tracking belongs to the server. The verifier, meaning the room server, must also hold the anchor where an ordinary file write can't reach it, and keep it from moving backwards (AxiomFirst's F3). That server-side path, plus key recovery, still has to be built and reviewed. Keep the current tokens until then.
 

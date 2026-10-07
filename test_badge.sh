@@ -8,6 +8,7 @@ $GS append trust.ledger Hunter.key "trust ledger opened" >/dev/null
 $B anchor trust.ledger Hunter.key > trust.anchor
 $B issue Hunter.key Plex.pub 7 room.read room.post:as=Plex capsule.* > Plex.badge
 C="challenge-$(date +%s)"; $B prove Plex.key Plex.badge "$C" > proof
+export GLYPHSAFE_MODE=enforce   # the security tests run in enforce mode
 ck() { GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check "$1" Hunter.pub "${5:-Plex.pub}" "$2" trust.ledger trust.anchor "${3:-$C}" "${4:-proof}" $6 >/dev/null; }
 N=0; pass() { echo "PASS $1"; N=$((N+1)); }
 ck Plex.badge room.read && pass "badge with seat-key proof admits room.read"
@@ -66,5 +67,8 @@ sed 's/"room.read"/"room.admin"/' Plex.badge > forged.badge
 ! ck forged.badge room.admin && pass "forged badge refused"
 # the revocation denial must be for the right reason
 GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check Plex.badge Hunter.pub Plex.pub room.read rolled.ledger trust.anchor "$C" proof | grep -q "rolled back" && pass "rollback denial names the rollback"
-[ "$N" -eq 24 ] || { echo "FAIL: only $N of 24 checks passed"; exit 1; }
-echo "ALL 24 BADGE TESTS PASS ∴Ω⧂"
+# Access first: advisory mode (the default) admits ordinary caps and logs why it would deny
+GLYPHSAFE_MODE=advisory GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check Plex.badge Hunter.pub Plex.pub room.read trust.ledger trust.anchor "$C" proof | grep -q "ADMITTED (advisory)" && pass "advisory mode admits ordinary access and logs the reason"
+! GLYPHSAFE_MODE=advisory GLYPHSAFE_VERIFIER_KEY=Verifier.key $B check v.slip Hunter.pub Plex.pub vital:delete trust.ledger trust.anchor "$C" vproof "rm capsule 42" >/dev/null && pass "advisory mode never waves through a vital action"
+[ "$N" -eq 26 ] || { echo "FAIL: only $N of 26 checks passed"; exit 1; }
+echo "ALL 26 BADGE TESTS PASS ∴Ω⧂"

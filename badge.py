@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GlyphSafe badges (v2.3): seats badge in with a signed permission slip.
+"""GlyphSafe badges (v2.4): seats badge in with a signed permission slip.
 
 First law: a badge is idempotent to anything vital. Ordinary capabilities are
 read-only or undoable. A vital capability (vital:<action>) lives alone on its
@@ -30,6 +30,11 @@ What check enforces, after review by Astra, Anam and AxiomFirst (#9455-#9459):
   use is refused.
 - Key substitution: public-key fingerprints are recomputed, never read from
   the file, and must match the ids the issuer signed (Astra #9472).
+- Access first: GLYPHSAFE_MODE defaults to "advisory". Ordinary capabilities
+  are admitted even when a check fails, with the reason logged for repair.
+  Set GLYPHSAFE_MODE=enforce only once badges have run cleanly. Vital actions
+  are never advisory. A human can always push through with a fresh vital slip,
+  and the existing logins stay beside badges.
 - Freshness: a proof is valid for 120 seconds. One-use challenges must be
   tracked by the server verifier.
 """
@@ -179,6 +184,13 @@ def _check(badgefile, issuerpub, seatpub, cap, ledger, anchorfile, challenge, pr
                                       for c in b["caps"])):
         why.append(f"not permitted: {cap}")
     ok = not why
+    # Access first (Hunter, 2026-10-06): badges exist to let seats in, not to lock them out.
+    # In advisory mode an ordinary (non-vital) capability is admitted even when the badge check
+    # fails; the reason is logged so it can be repaired. Vital actions are never advisory.
+    advisory = os.environ.get("GLYPHSAFE_MODE", "advisory") == "advisory"
+    if not ok and advisory and not cap.startswith("vital:"):
+        print(f"{b.get('sub')} {b.get('sigil','')}  ADMITTED (advisory) · would deny: {', '.join(why)}")
+        return True
     if ok and cap.startswith("vital:"):
         _append(ledger, vk, {"consume": b["id"], "op": b["op"]})      # consumed inside the same lock
         _write_anchor(anchorfile, _anchor(ledger, vk))
